@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
@@ -44,12 +44,42 @@ function NumberInput({ label, hint, value, min, max, step = 1, onChange }: {
   min?: number; max?: number; step?: number;
   onChange: (v: number | null) => void;
 }) {
+  const [draft, setDraft] = useState(value != null ? String(value) : "");
+  const editing = useRef(false);
+
+  useEffect(() => {
+    if (!editing.current) {
+      setDraft(value != null ? String(value) : "");
+    }
+  }, [value]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDraft(raw);
+    if (raw === "") {
+      onChange(null);
+    } else {
+      const n = parseFloat(raw);
+      if (!isNaN(n)) onChange(n);
+    }
+  }, [onChange]);
+
+  const handleBlur = useCallback(() => {
+    editing.current = false;
+    if (draft === "" || isNaN(parseFloat(draft))) {
+      // Restore previous value on blur if empty
+      setDraft(value != null ? String(value) : "");
+    }
+  }, [draft, value]);
+
   return (
     <div>
       <label className="label">{label}</label>
       {hint && <p className="text-xs text-gray-600 mb-1">{hint}</p>}
-      <input type="number" className="input" value={value ?? ""} min={min} max={max} step={step}
-        onChange={(e) => onChange(e.target.value === "" ? null : parseFloat(e.target.value))} />
+      <input type="number" className="input" value={draft} min={min} max={max} step={step}
+        onFocus={() => { editing.current = true; }}
+        onChange={handleChange}
+        onBlur={handleBlur} />
     </div>
   );
 }
