@@ -171,43 +171,67 @@ pub async fn start_server(
     let log_cb_clone = log_cb.clone();
 
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let mut s = state_clone.lock().unwrap();
-            s.log_lines.push(line.clone());
-            if s.log_lines.len() > 500 {
-                s.log_lines.drain(0..100);
+        let mut reader = BufReader::new(stdout);
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf).await {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+                    let mut s = state_clone.lock().unwrap();
+                    s.log_lines.push(line.clone());
+                    if s.log_lines.len() > 500 {
+                        s.log_lines.drain(0..100);
+                    }
+                    // Detect server ready
+                    if matches!(s.status, ServerStatus::Starting)
+                        && (line.contains("HTTP server listening")
+                            || line.contains("server is listening"))
+                    {
+                        s.status = ServerStatus::Running { port, pid };
+                        log::info!("Server ready on port {}", port);
+                    }
+                    drop(s);
+                    log_cb(line);
+                }
+                Err(e) => {
+                    log::warn!("Error reading server stdout: {}", e);
+                    break;
+                }
             }
-            // Detect server ready
-            if matches!(s.status, ServerStatus::Starting)
-                && (line.contains("HTTP server listening")
-                    || line.contains("server is listening"))
-            {
-                s.status = ServerStatus::Running { port, pid };
-                log::info!("Server ready on port {}", port);
-            }
-            drop(s);
-            log_cb(line);
         }
     });
 
     let state_clone2 = state.clone();
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let mut s = state_clone2.lock().unwrap();
-            s.log_lines.push(format!("[stderr] {}", line));
-            if s.log_lines.len() > 500 {
-                s.log_lines.drain(0..100);
+        let mut reader = BufReader::new(stderr);
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf).await {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+                    let mut s = state_clone2.lock().unwrap();
+                    s.log_lines.push(format!("[stderr] {}", line));
+                    if s.log_lines.len() > 500 {
+                        s.log_lines.drain(0..100);
+                    }
+                    if matches!(s.status, ServerStatus::Starting)
+                        && (line.contains("HTTP server listening")
+                            || line.contains("server is listening"))
+                    {
+                        s.status = ServerStatus::Running { port, pid };
+                    }
+                    drop(s);
+                    log_cb_clone(format!("[stderr] {}", line));
+                }
+                Err(e) => {
+                    log::warn!("Error reading server stderr: {}", e);
+                    break;
+                }
             }
-            if matches!(s.status, ServerStatus::Starting)
-                && (line.contains("HTTP server listening")
-                    || line.contains("server is listening"))
-            {
-                s.status = ServerStatus::Running { port, pid };
-            }
-            drop(s);
-            log_cb_clone(format!("[stderr] {}", line));
         }
     });
 
