@@ -1,10 +1,16 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Download,
   Database,
   Play,
   MessageSquare,
+  Minus,
+  Square,
+  Layers,
+  X,
 } from "lucide-react";
 import { clsx } from "clsx";
 import CatapultIcon from "./CatapultIcon";
@@ -17,46 +23,111 @@ const navItems = [
   { to: "/chat", label: "Chat", icon: MessageSquare },
 ];
 
-export default function Layout() {
+function WindowControls() {
+  const appWindow = getCurrentWindow();
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    appWindow.isMaximized().then(setMaximized);
+    const unlisten = appWindow.onResized(() => {
+      appWindow.isMaximized().then(setMaximized);
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
+
   return (
-    <div className="flex h-full bg-surface-0">
-      {/* Sidebar */}
-      <aside className="w-52 flex flex-col bg-surface-1 border-r border-border shrink-0">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 px-5 py-5 border-b border-border">
-          <div className="w-7 h-7 bg-primary flex items-center justify-center shrink-0">
-            <CatapultIcon size={14} className="text-white" />
-          </div>
-          <span className="font-semibold text-gray-100 text-base tracking-tight">
+    <div className="flex items-center">
+      <button
+        onClick={() => appWindow.minimize()}
+        className="w-10 h-11 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+        title="Minimize"
+      >
+        <Minus size={14} />
+      </button>
+      <button
+        onClick={() => appWindow.toggleMaximize()}
+        className="w-10 h-11 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+        title={maximized ? "Restore" : "Maximize"}
+      >
+        {maximized ? <Layers size={12} /> : <Square size={11} />}
+      </button>
+      <button
+        onClick={() => appWindow.close()}
+        className="w-10 h-11 flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-600 transition-colors"
+        title="Close"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+export default function Layout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const onDashboard = location.pathname === "/dashboard";
+
+  return (
+    <div className="flex flex-col h-full bg-surface-0">
+      {/* Title bar — custom, replaces OS decorations */}
+      <div
+        className="relative flex items-center h-11 px-3 border-b border-primary/25 shrink-0 bg-primary/8"
+      >
+        {/* Drag region — fills entire title bar behind interactive elements */}
+        <div
+          className="absolute inset-0"
+          onMouseDown={(e) => {
+            if (e.button === 0) getCurrentWindow().startDragging();
+          }}
+          onDoubleClick={() => getCurrentWindow().toggleMaximize()}
+        />
+
+        {/* Logo / home */}
+        <button
+          onClick={() => navigate("/dashboard")}
+          disabled={onDashboard}
+          className={`relative z-10 flex items-center gap-2 px-1.5 py-1 -ml-1 rounded transition-colors ${
+            onDashboard
+              ? "cursor-default"
+              : "hover:bg-primary/15 active:bg-primary/25"
+          }`}
+          title={onDashboard ? "Catapult" : "Back to Dashboard"}
+        >
+          <CatapultIcon size={22} className="text-primary-light" />
+          <span className="text-sm font-semibold text-gray-200 tracking-tight select-none">
             Catapult
           </span>
-        </div>
+        </button>
+
+        {/* Separator */}
+        <div className="relative z-10 w-px h-5 bg-primary/20 mx-3" />
 
         {/* Nav */}
-        <nav className="flex-1 py-3 px-2">
+        <nav className="relative z-10 flex items-center gap-0.5">
           {navItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 clsx(
-                  "flex items-center gap-3 px-3 py-2.5 mb-0.5 text-sm font-medium transition-colors",
+                  "flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded transition-colors",
                   isActive
                     ? "bg-primary/20 text-primary-light"
-                    : "text-gray-400 hover:text-gray-200 hover:bg-surface-3"
+                    : "text-gray-400 hover:text-gray-200 hover:bg-primary/10"
                 )
               }
             >
-              <Icon size={16} />
+              <Icon size={13} />
               {label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="px-4 py-3 border-t border-border">
-          <p className="text-xs text-gray-600">llama.cpp launcher</p>
+        {/* Window controls */}
+        <div className="relative z-10 ml-auto">
+          <WindowControls />
         </div>
-      </aside>
+      </div>
 
       {/* Main */}
       <main className="flex-1 overflow-hidden flex flex-col min-w-0">

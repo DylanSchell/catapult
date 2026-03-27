@@ -16,7 +16,7 @@
   }
 
   body {
-    background-color: #0a0a0b;
+    background-color: #110e0c;
     color: #e0e0e0;
     font-family: "Inter", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -32,11 +32,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #3e3e4a;
+    background: #524840;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #55556a;
+    background: #655a52;
   }
 }
 
@@ -84,7 +84,7 @@
   }
 
   select.input option {
-    background: #18181b;
+    background: #231e1b;
     color: #e0e0e0;
   }
 

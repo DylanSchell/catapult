@@ -5,20 +5,20 @@ export default {
     extend: {
       colors: {
         surface: {
-          0: "#0a0a0b",
-          1: "#111113",
-          2: "#18181b",
-          3: "#222226",
-          4: "#2a2a30",
+          0: "#110e0c",
+          1: "#1a1613",
+          2: "#231e1b",
+          3: "#2e2824",
+          4: "#3a332e",
         },
         border: {
-          DEFAULT: "#2e2e36",
-          strong: "#3e3e4a",
+          DEFAULT: "#3e3530",
+          strong: "#524840",
         },
         primary: {
-          DEFAULT: "#7c3aed",
-          hover: "#6d28d9",
-          light: "#8b5cf6",
+          DEFAULT: "#b5342a",
+          hover: "#9c2c23",
+          light: "#e06b62",
         },
         accent: {
           green: "#22c55e",
