@@ -14,6 +14,7 @@ import {
   Star,
   Trash2,
   CheckCircle,
+  Eye,
 } from "lucide-react";
 import type {
   SystemInfo,
@@ -520,6 +521,11 @@ export default function Dashboard() {
                   <span className="flex-1 text-sm text-gray-300 truncate">
                     {m.name}
                   </span>
+                  {m.is_vision && (
+                    <span title="Vision model">
+                      <Eye size={12} className="text-accent-blue shrink-0" />
+                    </span>
+                  )}
 
                   {m.quant && (
                     <span className={`${quantColor(m.quant)} text-[10px]`}>{m.quant}</span>

@@ -1080,9 +1080,6 @@ export default function Server() {
 
             <Section title="Multimodal" />
             <div className="grid grid-cols-2 gap-3">
-              <TextInput label="mmproj" hint={config.mmproj_path ? `Auto-detected: ${config.mmproj_path}` : "Multimodal projector file (auto-detected for vision models)"}
-                value={getEp("mmproj")} placeholder={config.mmproj_path ?? ""}
-                onChange={(v) => setEp("mmproj", v)} />
               <TextInput label="mmproj URL" value={getEp("mmproj-url")}
                 onChange={(v) => setEp("mmproj-url", v)} />
               <NumberInput label="Image Min Tokens" value={getEpNum("image-min-tokens")} min={0}

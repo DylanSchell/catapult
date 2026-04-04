@@ -1335,15 +1335,6 @@ pub static PARAMS: &[ParamDef] = &[
 
     // ── Advanced: Multimodal ─────────────────────────────────────────────────
     ParamDef {
-        key: "mmproj",
-        label: "Multimodal Projector",
-        description: "Path to mmproj file for vision models",
-        param_type: ParamType::String,
-        default_display: "",
-        category: "Advanced",
-        is_typed_field: false,
-    },
-    ParamDef {
         key: "mmproj-url",
         label: "mmproj URL",
         description: "URL to download mmproj file",

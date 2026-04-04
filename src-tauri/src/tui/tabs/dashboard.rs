@@ -94,11 +94,8 @@ pub fn render(app: &mut TuiApp, area: Rect, frame: &mut Frame) {
     }
 
     // Two-column layout
-    let columns = Layout::horizontal([
-        Constraint::Percentage(45),
-        Constraint::Percentage(55),
-    ])
-    .split(area);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).split(area);
 
     render_left_column(app, columns[0], frame);
     render_right_column(app, columns[1], frame);
@@ -116,9 +113,9 @@ fn render_left_column(app: &TuiApp, area: Rect, frame: &mut Frame) {
     let guide_h = if !has_runtime || !has_models { 6 } else { 0 };
 
     let chunks = Layout::vertical([
-        Constraint::Length(7),  // System info
-        Constraint::Length(5),  // Runtime
-        Constraint::Length(7),  // Server
+        Constraint::Length(7),       // System info
+        Constraint::Length(5),       // Runtime
+        Constraint::Length(7),       // Server
         Constraint::Length(guide_h), // Quick start (conditional)
         Constraint::Min(0),
     ])
@@ -155,14 +152,18 @@ fn render_system_info(app: &TuiApp, area: Rect, frame: &mut Frame) {
     let mut lines = vec![section_header(" System ")];
 
     if let Some(ref si) = app.dashboard.system_info {
-        lines.push(kv_line("  CPU     ", &format!(
-            "{} ({}C/{}T)", si.cpu_name, si.cpu_cores, si.cpu_threads
-        )));
-        lines.push(kv_line("  RAM     ", &format!(
-            "{:.1} GB avail / {:.1} GB total",
-            si.available_ram_mb as f64 / 1024.0,
-            si.total_ram_mb as f64 / 1024.0
-        )));
+        lines.push(kv_line(
+            "  CPU     ",
+            &format!("{} ({}C/{}T)", si.cpu_name, si.cpu_cores, si.cpu_threads),
+        ));
+        lines.push(kv_line(
+            "  RAM     ",
+            &format!(
+                "{:.1} GB avail / {:.1} GB total",
+                si.available_ram_mb as f64 / 1024.0,
+                si.total_ram_mb as f64 / 1024.0
+            ),
+        ));
         if si.gpus.is_empty() {
             lines.push(Line::from(vec![
                 label_span("  GPU     "),
@@ -269,14 +270,18 @@ fn render_server_status(app: &TuiApp, area: Rect, frame: &mut Frame) {
                     Style::default().fg(Color::Yellow),
                 )));
             }
-            lines.push(hint_line("  [x] Stop server  [s] Server config  [l] View logs"));
+            lines.push(hint_line(
+                "  [x] Stop server  [s] Server config  [l] View logs",
+            ));
         }
         None => {
             lines.push(Line::from(vec![
                 label_span("  Status  "),
                 Span::styled("Stopped", Style::default().fg(Color::Red)),
             ]));
-            lines.push(hint_line("  [s] Configure & launch  [Enter] Quick-launch selected model"));
+            lines.push(hint_line(
+                "  [s] Configure & launch  [Enter] Quick-launch selected model",
+            ));
         }
     }
 
@@ -335,13 +340,19 @@ fn render_models_header(app: &TuiApp, area: Rect, frame: &mut Frame) {
 
     if total == 0 {
         lines.push(Line::from(vec![
-            Span::styled("  No models installed  ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                "  No models installed  ",
+                Style::default().fg(Color::Yellow),
+            ),
             Span::styled("[m] Browse & download", Style::default().fg(Color::Cyan)),
         ]));
     } else {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(format!("{} installed", total), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{} installed", total),
+                Style::default().fg(Color::White),
+            ),
             if fav_count > 0 {
                 Span::styled(
                     format!(", {} favorited", fav_count),
@@ -383,6 +394,7 @@ fn render_models_list(app: &TuiApp, area: Rect, frame: &mut Frame) {
 
             let marker = if is_selected { " > " } else { "   " };
             let star = if is_fav { "* " } else { "  " };
+            let vision = if model.is_vision { "V " } else { "  " };
             let size = format_size(model.size_bytes);
             let quant = model.quant.clone().unwrap_or_default();
             let params = model.params_b.clone().unwrap_or_default();
@@ -402,10 +414,20 @@ fn render_models_list(app: &TuiApp, area: Rect, frame: &mut Frame) {
                 Style::default().fg(Color::Yellow)
             };
 
-            let quant_style = if is_selected { style } else { quant_color(&quant) };
+            let vision_style = if is_selected {
+                style
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+
+            let quant_style = if is_selected {
+                style
+            } else {
+                quant_color(&quant)
+            };
 
             // Compute name width to fit in available space
-            let fixed_width = 3 + 2 + 9 + 9 + 6; // marker + star + size + quant + params
+            let fixed_width = 3 + 2 + 2 + 9 + 9 + 6; // marker + star + vision + size + quant + params
             let name_width = (area.width as usize).saturating_sub(fixed_width);
             let name = if model.name.len() > name_width {
                 format!("{}~", &model.name[..name_width.saturating_sub(1)])
@@ -416,6 +438,7 @@ fn render_models_list(app: &TuiApp, area: Rect, frame: &mut Frame) {
             Line::from(vec![
                 Span::styled(marker, style),
                 Span::styled(star, star_style),
+                Span::styled(vision, vision_style),
                 Span::styled(name, style),
                 Span::styled(format!("{:>8} ", size), style),
                 Span::styled(format!("{:<8}", quant), quant_style),
@@ -483,7 +506,8 @@ fn format_size(bytes: u64) -> String {
 
 fn quant_color(quant: &str) -> Style {
     let q = quant.to_uppercase();
-    if q.starts_with("F16") || q.starts_with("F32") || q.starts_with("BF16") || q.starts_with("Q8") {
+    if q.starts_with("F16") || q.starts_with("F32") || q.starts_with("BF16") || q.starts_with("Q8")
+    {
         Style::default().fg(Color::Blue)
     } else if q.starts_with("Q6") {
         Style::default().fg(Color::Cyan)
