@@ -51,6 +51,7 @@ jobs:
   build:
     needs: check
     if: github.event_name != 'pull_request'
+    environment: ci
     permissions:
       contents: write
     strategy:
