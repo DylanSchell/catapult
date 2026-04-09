@@ -5,6 +5,7 @@ A desktop launcher for [llama.cpp](https://github.com/ggml-org/llama.cpp). Manag
 Available in two interfaces:
 - **GUI** — A Tauri v2 desktop application (Rust backend + React/TypeScript frontend)
 <img width="1280" height="808" alt="catapult-ui" src="https://github.com/user-attachments/assets/a39fa2ae-d289-4bdd-a335-2d083666956c" />
+
 - **TUI** — A terminal-based interface built with [ratatui](https://github.com/ratatui/ratatui) for those who prefer the command line
 <img width="1212" height="684" alt="catapult-tui" src="https://github.com/user-attachments/assets/368ac91d-fe48-474c-8eca-ed46e5d79c6e" />
 
@@ -12,7 +13,7 @@ Available in two interfaces:
 
 **Dual Interface**
 - **GUI**: Full desktop experience with visual dashboards, tabbed configuration, and embedded WebUI
-- **TUI**: Fast keyboard-driven terminal interface with the same feature set
+- **TUI**: Fast keyboard-driven terminal interface with the same core features (no first-launch wizard)
 
 **Runtime Management**
 - Download managed llama.cpp builds from GitHub releases with automatic platform/backend detection
@@ -29,7 +30,7 @@ Available in two interfaces:
 - Vision model detection with automatic mmproj file pairing; vision models marked in the dashboard (eye icon in GUI, `V` marker in TUI)
 
 **Server Configuration**
-- Full llama.cpp server parameter coverage organized into tabbed UI (Context, Hardware, Sampling, Server, Chat, Advanced)
+- Full llama.cpp server parameter coverage — tabbed UI in the GUI (Context, Hardware, Sampling, Server, Chat, Advanced), autocomplete-driven parameter editor in the TUI
 - Save and load named configuration presets; per-model preset memory (last-used preset auto-loads on model selection)
 - Auto-import `presets.ini` from HuggingFace repos on model download (sampling parameters applied as a named preset)
 - Process lifecycle management with log streaming
@@ -92,29 +93,28 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin catapult-tui
 
 ## TUI Usage
 
-The TUI provides the same functionality as the GUI in a terminal-friendly format.
+The TUI provides the same core functionality as the GUI in a keyboard-driven terminal interface.
 
-### Navigation
+### Global Keys
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift+Tab` | Navigate between fields/sections |
-| `1-6` | Switch tabs (Dashboard, Runtime, Models, Server, Logs, Chat) |
-| `d`, `r`, `m`, `s`, `l`, `c` | Quick-jump to tab by first letter |
+| `d`, `r`, `m`, `s`, `l`, `c` | Switch tab (Dashboard, Runtime, Models, Server, Logs, Chat) |
 | `↑/↓` | Navigate lists |
-| `Enter` | Select/activate |
-| `Space` | Toggle checkbox |
-| `Esc` / `q` | Go back / quit |
-| `?` | Show help |
+| `Enter` | Select / confirm |
+| `Esc` | Go back (to parent mode or Dashboard) |
+| `q` | Quit |
+| `Ctrl+C` | Quit immediately |
+| `Ctrl+X` | Abort the active download |
 
 ### Tabs
 
-- **Dashboard** — System overview, quick launch, runtime status
-- **Runtime** — Download and switch between llama.cpp builds
-- **Models** — Browse local models, search HuggingFace, manage downloads
-- **Server** — Configure and start the llama-server with full parameter coverage
-- **Logs** — Stream server output in real-time
-- **Chat** — Launch llama-cli for terminal-based chat (TUI resumes after exit)
+- **Dashboard** — System info (CPU, RAM, GPUs), runtime & server status, installed model list. `Enter` selects a model and jumps to Server; `f` toggles favorite; `x` stops the server.
+- **Runtime** — Lists managed and custom runtimes. `d` fetches the latest llama.cpp release and shows an asset picker; `a` activates the selected runtime.
+- **Models** — Four sub-modes switched with `b` (Browse HuggingFace), `e` (Recommended), `p` (Directories), `Esc` (back to Installed). In Installed mode: `/` to filter, `f` to favorite, `x` to delete, `Enter` to select model → Server tab. Browse mode searches HuggingFace and downloads GGUF files with mmproj picker for vision models.
+- **Server** — Autocomplete-driven parameter editor with `50+` llama-server flags. `/` or `Tab` to search parameters, `Enter` to start the server, `x` to stop. `l` loads a preset, `s` saves a preset. `Delete`/`Backspace` removes an override.
+- **Logs** — Real-time server log viewer. `f` toggles auto-follow, `PageUp`/`PageDown`/`Home`/`End` for scrolling.
+- **Chat** — Launches `llama-cli` as a subprocess with the selected model and server settings. `Tab` to focus the extra arguments field, `Enter` to launch. The TUI resumes automatically when llama-cli exits (`Ctrl+C` or `/exit`).
 
 ### Building the TUI
 
