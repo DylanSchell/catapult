@@ -2,12 +2,17 @@
 name = "catapult"
 version = "0.1.0"
 description = "A llama.cpp launcher"
-authors = []
-edition = "2021"
+authors = ["Piotr Wilkin <ilintar@gmail.com>"]
+edition = "2026"
+default-run = "catapult"
 
 [lib]
 name = "catapult_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "catapult"
+path = "src/main.rs"
 
 [[bin]]
 name = "catapult-tui"
