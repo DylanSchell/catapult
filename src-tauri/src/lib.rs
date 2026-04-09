@@ -236,13 +236,45 @@ async fn get_recommended_models(state: State<'_, AppState>) -> Result<Vec<Recomm
 }
 
 #[tauri::command]
-async fn get_known_owners() -> Vec<serde_json::Value> {
-    KNOWN_GGUF_OWNERS
+async fn get_known_owners(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let config = state.config.lock().unwrap().clone();
+    let effective = config.effective_owners();
+    Ok(effective
         .iter()
-        .map(|(id, desc)| {
+        .map(|id| {
+            let desc = KNOWN_GGUF_OWNERS
+                .iter()
+                .find(|(k, _)| *k == id.as_str())
+                .map(|(_, d)| *d)
+                .unwrap_or("User-added source");
             serde_json::json!({ "id": id, "description": desc })
         })
-        .collect()
+        .collect())
+}
+
+#[tauri::command]
+async fn get_preferred_owners(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(state.config.lock().unwrap().effective_owners())
+}
+
+#[tauri::command]
+async fn set_preferred_owners(
+    owners: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut config = state.config.lock().unwrap();
+    config.preferred_owners = owners;
+    config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn validate_hf_owner(
+    owner: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    huggingface::validate_hf_gguf_author(&state.http_client, &owner)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -290,6 +322,7 @@ async fn download_model(
         download_url,
         is_split,
         split_parts: parts,
+        is_mmproj: false,
     };
 
     // Mark download active
@@ -644,6 +677,9 @@ pub fn run() {
             list_installed_models,
             get_recommended_models,
             get_known_owners,
+            get_preferred_owners,
+            set_preferred_owners,
+            validate_hf_owner,
             search_hf_models,
             get_hf_repo_files,
             download_model,

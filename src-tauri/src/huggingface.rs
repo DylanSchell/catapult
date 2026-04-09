@@ -1,6 +1,16 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// Default preferred GGUF sources in priority order.
+pub const DEFAULT_PREFERRED_OWNERS: &[&str] = &[
+    "ggml-org",
+    "bartowski",
+    "unsloth",
+    "AesSedai",
+    "ubergarm",
+    "mradermacher",
+];
+
 /// Well-known providers of GGUF models on HuggingFace
 pub const KNOWN_GGUF_OWNERS: &[(&str, &str)] = &[
     ("unsloth", "Dominant quantizer, Unsloth Dynamic 2.0 quants"),
@@ -164,6 +174,8 @@ pub struct HfFile {
     pub is_split: bool,
     #[serde(default)]
     pub split_parts: Vec<HfFilePart>,
+    #[serde(default)]
+    pub is_mmproj: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +235,26 @@ pub async fn search_models(
     Ok(models.into_iter().map(convert_model).collect())
 }
 
+/// Check if a HuggingFace user/org exists and has published GGUF models.
+pub async fn validate_hf_gguf_author(client: &reqwest::Client, author: &str) -> Result<bool> {
+    let url = format!(
+        "https://huggingface.co/api/models?author={}&filter=gguf&limit=1",
+        urlencoding_simple(author)
+    );
+    let response = client
+        .get(&url)
+        .header("User-Agent", "catapult-launcher/0.1")
+        .send()
+        .await
+        .context("Failed to validate HuggingFace author")?;
+
+    if !response.status().is_success() {
+        return Ok(false);
+    }
+    let models: Vec<HfApiModel> = response.json().await.unwrap_or_default();
+    Ok(!models.is_empty())
+}
+
 /// File entry from the HuggingFace tree API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HfTreeEntry {
@@ -237,6 +269,11 @@ struct HfTreeEntry {
 pub fn is_imatrix_file(filename: &str) -> bool {
     let lower = filename.to_lowercase();
     lower.contains("imatrix") || lower.contains("importance_matrix")
+}
+
+/// Check if a filename is an mmproj (vision projection) file.
+pub fn is_mmproj_file(filename: &str) -> bool {
+    filename.to_lowercase().contains("mmproj")
 }
 
 /// Parse a split GGUF filename like `model-00001-of-00003.gguf`.
@@ -276,10 +313,12 @@ fn consolidate_files(files: Vec<HfFile>) -> Vec<HfFile> {
         } else {
             // Strip directory prefix for flat download
             let basename = file.filename.rsplit('/').next().unwrap_or(&file.filename).to_string();
+            let is_mmproj = is_mmproj_file(&basename);
             singles.push(HfFile {
                 filename: basename,
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj,
                 ..file
             });
         }
@@ -315,6 +354,7 @@ fn consolidate_files(files: Vec<HfFile>) -> Vec<HfFile> {
             download_url: first.download_url.clone(),
             is_split: true,
             split_parts,
+            is_mmproj: false,
         });
     }
 
@@ -384,6 +424,7 @@ pub async fn get_repo_files(client: &reqwest::Client, repo_id: &str) -> Result<V
                 "https://huggingface.co/{}/resolve/main/{}",
                 repo_id, e.path
             );
+            let is_mmproj = is_mmproj_file(&e.path);
             HfFile {
                 filename: e.path,
                 size_bytes: e.size.unwrap_or(0),
@@ -391,6 +432,7 @@ pub async fn get_repo_files(client: &reqwest::Client, repo_id: &str) -> Result<V
                 download_url,
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj,
             }
         })
         .collect();
@@ -417,6 +459,7 @@ fn convert_model(m: HfApiModel) -> HfModel {
                 "https://huggingface.co/{}/resolve/main/{}",
                 repo_id, f.rfilename
             );
+            let is_mmproj = is_mmproj_file(&f.rfilename);
             HfFile {
                 filename: f.rfilename,
                 size_bytes: f.size.unwrap_or(0),
@@ -424,6 +467,7 @@ fn convert_model(m: HfApiModel) -> HfModel {
                 download_url,
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj,
             }
         })
         .collect();
@@ -555,6 +599,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_preferred_owners_is_non_empty() {
+        assert!(!DEFAULT_PREFERRED_OWNERS.is_empty());
+    }
+
+    #[test]
+    fn default_preferred_owners_has_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for owner in DEFAULT_PREFERRED_OWNERS {
+            assert!(seen.insert(owner), "duplicate owner: {}", owner);
+        }
+    }
+
+    #[test]
+    fn default_preferred_owners_no_empty_strings() {
+        for owner in DEFAULT_PREFERRED_OWNERS {
+            assert!(!owner.is_empty());
+            assert!(!owner.contains(' '), "owner contains space: {:?}", owner);
+        }
+    }
+
+    #[test]
     fn extract_quant_standard_patterns() {
         assert_eq!(extract_quant("model-Q4_K_M.gguf"), Some("Q4_K_M".to_string()));
         assert_eq!(extract_quant("model-Q8_0.gguf"), Some("Q8_0".to_string()));
@@ -634,6 +699,7 @@ mod tests {
                 download_url: "https://example.com/Q4_K_M/model-Q4_K_M-00002-of-00003.gguf".into(),
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj: false,
             },
             HfFile {
                 filename: "Q4_K_M/model-Q4_K_M-00001-of-00003.gguf".into(),
@@ -642,6 +708,7 @@ mod tests {
                 download_url: "https://example.com/Q4_K_M/model-Q4_K_M-00001-of-00003.gguf".into(),
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj: false,
             },
             HfFile {
                 filename: "Q4_K_M/model-Q4_K_M-00003-of-00003.gguf".into(),
@@ -650,6 +717,7 @@ mod tests {
                 download_url: "https://example.com/Q4_K_M/model-Q4_K_M-00003-of-00003.gguf".into(),
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj: false,
             },
             HfFile {
                 filename: "single-Q8_0.gguf".into(),
@@ -658,6 +726,7 @@ mod tests {
                 download_url: "https://example.com/single-Q8_0.gguf".into(),
                 is_split: false,
                 split_parts: vec![],
+                is_mmproj: false,
             },
         ];
 

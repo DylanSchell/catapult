@@ -41,12 +41,21 @@ pub struct ModelsTabState {
     pub expanded_repo: Option<usize>,
     pub file_selected: usize,
     pub files_loading: bool,
+    // mmproj picker (shown when downloading a file from a repo with mmproj files)
+    pub mmproj_picker: Option<MmProjPicker>,
     // Directories
     pub dir_selected: usize,
     pub dir_input: tui_input::Input,
     pub dir_input_active: bool,
     pub dir_input_mode: DirInputMode,
     pub dir_confirm_remove: bool,
+}
+
+pub struct MmProjPicker {
+    pub file: HfFile,
+    pub repo_id: String,
+    pub mmproj_files: Vec<HfFile>,
+    pub selected: usize, // 0 = just model, 1..N = model + mmproj[n-1]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,6 +83,7 @@ impl Default for ModelsTabState {
             expanded_repo: None,
             file_selected: 0,
             files_loading: false,
+            mmproj_picker: None,
             dir_selected: 0,
             dir_input: tui_input::Input::default(),
             dir_input_active: false,
@@ -311,6 +321,46 @@ fn handle_recommended(app: &mut TuiApp, key: KeyEvent) -> Action {
 }
 
 fn handle_search(app: &mut TuiApp, key: KeyEvent) -> Action {
+    // Handle mmproj picker if active
+    if let Some(ref picker) = app.models_tab.mmproj_picker {
+        let option_count = 1 + picker.mmproj_files.len(); // "just model" + each mmproj
+        match key.code {
+            KeyCode::Esc => {
+                app.models_tab.mmproj_picker = None;
+            }
+            KeyCode::Up => {
+                if let Some(ref mut p) = app.models_tab.mmproj_picker {
+                    if p.selected > 0 {
+                        p.selected -= 1;
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut p) = app.models_tab.mmproj_picker {
+                    if p.selected < option_count - 1 {
+                        p.selected += 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let picker = app.models_tab.mmproj_picker.take().unwrap();
+                let repo_id = picker.repo_id;
+                let file = picker.file;
+                if !app.downloads.contains_key(&file.filename) {
+                    start_file_download(app, &repo_id, &file);
+                }
+                if picker.selected > 0 {
+                    let mmproj = &picker.mmproj_files[picker.selected - 1];
+                    if !app.downloads.contains_key(&mmproj.filename) {
+                        start_file_download(app, &repo_id, mmproj);
+                    }
+                }
+            }
+            _ => {}
+        }
+        return Action::None;
+    }
+
     // If we're in the repo file list
     if let Some(repo_idx) = app.models_tab.expanded_repo {
         if !app.input_focused {
@@ -318,7 +368,7 @@ fn handle_search(app: &mut TuiApp, key: KeyEvent) -> Action {
                 .models_tab
                 .search_results
                 .get(repo_idx)
-                .map(|m| m.files.len())
+                .map(|m| m.files.iter().filter(|f| !f.is_mmproj).count())
                 .unwrap_or(0);
 
             match key.code {
@@ -337,20 +387,38 @@ fn handle_search(app: &mut TuiApp, key: KeyEvent) -> Action {
                     }
                 }
                 KeyCode::Enter => {
-                    // Download the selected file
+                    // Download the selected file (with mmproj picker if applicable)
                     let download_info = app
                         .models_tab
                         .search_results
                         .get(repo_idx)
                         .and_then(|model| {
-                            model
-                                .files
+                            let non_mmproj: Vec<_> =
+                                model.files.iter().filter(|f| !f.is_mmproj).collect();
+                            non_mmproj
                                 .get(app.models_tab.file_selected)
-                                .map(|file| (model.repo_id.clone(), file.clone()))
+                                .map(|file| {
+                                    let mmproj_files: Vec<HfFile> = model
+                                        .files
+                                        .iter()
+                                        .filter(|f| f.is_mmproj)
+                                        .cloned()
+                                        .collect();
+                                    (model.repo_id.clone(), (*file).clone(), mmproj_files)
+                                })
                         });
-                    if let Some((repo_id, file)) = download_info {
-                        if !app.downloads.contains_key(&file.filename) {
+                    if let Some((repo_id, file, mmproj_files)) = download_info {
+                        if app.downloads.contains_key(&file.filename) {
+                            // already downloading
+                        } else if mmproj_files.is_empty() {
                             start_file_download(app, &repo_id, &file);
+                        } else {
+                            app.models_tab.mmproj_picker = Some(MmProjPicker {
+                                file,
+                                repo_id,
+                                mmproj_files,
+                                selected: 0,
+                            });
                         }
                     }
                 }
@@ -984,6 +1052,8 @@ fn render_search(app: &TuiApp, area: Rect, frame: &mut Frame) {
             ]),
             chunks[2],
         );
+    } else if app.models_tab.mmproj_picker.is_some() {
+        render_mmproj_picker(app, chunks[2], frame);
     } else if let Some(repo_idx) = app.models_tab.expanded_repo {
         // Show files for expanded repo
         render_repo_files(app, repo_idx, chunks[2], frame);
@@ -992,7 +1062,9 @@ fn render_search(app: &TuiApp, area: Rect, frame: &mut Frame) {
         render_search_results(app, chunks[2], frame);
     }
 
-    let footer_text = if app.models_tab.expanded_repo.is_some() {
+    let footer_text = if app.models_tab.mmproj_picker.is_some() {
+        " [Enter]Confirm  [Esc]Cancel"
+    } else if app.models_tab.expanded_repo.is_some() {
         " [Enter]Download  [Esc]Back to results"
     } else if !app.models_tab.search_results.is_empty() && !app.input_focused {
         " [Enter]View files  [/]New search  [Esc]Back"
@@ -1071,11 +1143,13 @@ fn render_repo_files(app: &TuiApp, repo_idx: usize, area: Rect, frame: &mut Fram
         None => return,
     };
 
+    let non_mmproj: Vec<&HfFile> = model.files.iter().filter(|f| !f.is_mmproj).collect();
+
     let mut lines = vec![Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(&model.repo_id, Style::default().fg(Color::Cyan)),
         Span::styled(
-            format!("  {} files", model.files.len()),
+            format!("  {} files", non_mmproj.len()),
             Style::default().fg(Color::Blue),
         ),
     ])];
@@ -1085,7 +1159,7 @@ fn render_repo_files(app: &TuiApp, repo_idx: usize, area: Rect, frame: &mut Fram
             "  Loading files...",
             Style::default().fg(Color::Yellow),
         )));
-    } else if model.files.is_empty() {
+    } else if non_mmproj.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No GGUF files found",
             Style::default().fg(Color::Yellow),
@@ -1098,7 +1172,7 @@ fn render_repo_files(app: &TuiApp, repo_idx: usize, area: Rect, frame: &mut Fram
             0
         };
 
-        for (i, file) in model.files.iter().enumerate().skip(scroll).take(visible) {
+        for (i, file) in non_mmproj.iter().enumerate().skip(scroll).take(visible) {
             let is_selected = i == app.models_tab.file_selected;
             let style = if is_selected {
                 Style::default()
@@ -1125,6 +1199,71 @@ fn render_repo_files(app: &TuiApp, repo_idx: usize, area: Rect, frame: &mut Fram
                 Span::styled(split, style),
             ]));
         }
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_mmproj_picker(app: &TuiApp, area: Rect, frame: &mut Frame) {
+    let picker = match &app.models_tab.mmproj_picker {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "  Download options",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("  Model: {}", picker.file.filename),
+            Style::default().fg(Color::Blue),
+        )),
+        Line::raw(""),
+    ];
+
+    // Option 0: just the model
+    let is_selected = picker.selected == 0;
+    let style = if is_selected {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let marker = if is_selected { " > " } else { "   " };
+    lines.push(Line::from(vec![
+        Span::styled(marker, style),
+        Span::styled("Just the model", style),
+        Span::styled(
+            format!("  ({})", format_size(picker.file.size_bytes)),
+            style,
+        ),
+    ]));
+
+    // Options 1..N: model + each mmproj
+    for (i, mp) in picker.mmproj_files.iter().enumerate() {
+        let is_selected = picker.selected == i + 1;
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let marker = if is_selected { " > " } else { "   " };
+        lines.push(Line::from(vec![
+            Span::styled(marker, style),
+            Span::styled(format!("Model + {}", mp.filename), style),
+            Span::styled(
+                format!("  ({})", format_size(picker.file.size_bytes + mp.size_bytes)),
+                style,
+            ),
+        ]));
     }
 
     frame.render_widget(Paragraph::new(lines), area);

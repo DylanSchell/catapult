@@ -75,6 +75,9 @@ pub struct AppConfig {
     /// Maps model file path → last-used preset name for that model
     #[serde(default)]
     pub model_presets: HashMap<String, String>,
+    /// Preferred GGUF source owners on HuggingFace, in priority order.
+    #[serde(default)]
+    pub preferred_owners: Vec<String>,
 }
 
 impl AppConfig {
@@ -250,6 +253,18 @@ impl AppConfig {
     pub fn is_managed_runtime(&self) -> bool {
         matches!(self.active_runtime, ActiveRuntime::Managed { .. })
     }
+
+    /// Returns the effective preferred owners list, falling back to defaults if empty.
+    pub fn effective_owners(&self) -> Vec<String> {
+        if self.preferred_owners.is_empty() {
+            crate::huggingface::DEFAULT_PREFERRED_OWNERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            self.preferred_owners.clone()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -281,5 +296,49 @@ mod tests {
         let json = r#"{"auto_check_updates":false,"wizard_completed":true,"favorite_models":[]}"#;
         let cfg: AppConfig = serde_json::from_str(json).unwrap();
         assert!(cfg.model_presets.is_empty());
+    }
+
+    #[test]
+    fn preferred_owners_defaults_empty() {
+        let cfg = AppConfig::default();
+        assert!(cfg.preferred_owners.is_empty());
+    }
+
+    #[test]
+    fn preferred_owners_round_trips_through_json() {
+        let mut cfg = AppConfig::default();
+        cfg.preferred_owners = vec!["bartowski".to_string(), "unsloth".to_string()];
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.preferred_owners, vec!["bartowski", "unsloth"]);
+    }
+
+    #[test]
+    fn preferred_owners_missing_from_json_defaults_to_empty() {
+        let json = r#"{"auto_check_updates":false,"wizard_completed":true,"favorite_models":[]}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(cfg.preferred_owners.is_empty());
+    }
+
+    #[test]
+    fn effective_owners_uses_defaults_when_empty() {
+        let cfg = AppConfig::default();
+        let effective = cfg.effective_owners();
+        assert_eq!(
+            effective,
+            crate::huggingface::DEFAULT_PREFERRED_OWNERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn effective_owners_uses_custom_when_set() {
+        let mut cfg = AppConfig::default();
+        cfg.preferred_owners = vec!["myorg".to_string(), "another".to_string()];
+        assert_eq!(cfg.effective_owners(), vec!["myorg", "another"]);
     }
 }

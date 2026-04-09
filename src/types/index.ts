@@ -130,6 +130,7 @@ export interface HfFile {
   download_url: string;
   is_split: boolean;
   split_parts: HfFilePart[];
+  is_mmproj: boolean;
 }
 
 export interface HfFilePart {
@@ -209,4 +210,5 @@ export interface AppConfig {
   wizard_completed: boolean;
   /** Maps model file path → last-used preset name */
   model_presets: Record<string, string>;
+  preferred_owners: string[];
 }

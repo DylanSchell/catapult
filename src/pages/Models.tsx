@@ -26,12 +26,13 @@ import type {
   DownloadProgress,
 } from "../types";
 
-type Tab = "installed" | "recommended" | "browse" | "directories";
+type Tab = "installed" | "recommended" | "browse" | "settings";
 type SortCol = "name" | "params" | "quant" | "size" | "ctx";
 type SortDir = "asc" | "desc";
 
 
 import { formatSize, quantColor, quantSortKey, isImatrixFile } from "../utils/format";
+import PreferredOwners from "../components/PreferredOwners";
 
 function QuantBadge({ quant }: { quant: string }) {
   return <span className={`${quantColor(quant)} text-[10px]`}>{quant}</span>;
@@ -59,6 +60,12 @@ export default function Models() {
   const [nameFilter, setNameFilter] = useState("");
   const [quantFilter, setQuantFilter] = useState("");
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [preferredOwners, setPreferredOwners] = useState<string[]>([]);
+  const [mmProjPicker, setMmProjPicker] = useState<{
+    repoId: string;
+    file: HfFile;
+    mmProjFiles: HfFile[];
+  } | null>(null);
 
   const reloadDirs = useCallback(async () => {
     try {
@@ -96,6 +103,7 @@ export default function Models() {
     reloadDirs();
     reloadFavorites();
     invoke<KnownOwner[]>("get_known_owners").then(setOwners).catch(() => {});
+    invoke<string[]>("get_preferred_owners").then(setPreferredOwners).catch(() => {});
 
     const unlisten = listen<DownloadProgress>("download_progress", (e) => {
       const p = e.payload;
@@ -172,6 +180,26 @@ export default function Models() {
     }
   };
 
+  const handleDownloadClick = (repoId: string, file: HfFile) => {
+    const files = repoFiles[repoId] || [];
+    const mmProjFiles = files.filter((f) => f.is_mmproj);
+    if (mmProjFiles.length > 0 && !file.is_mmproj) {
+      setMmProjPicker({ repoId, file, mmProjFiles });
+    } else {
+      startDownload(repoId, file);
+    }
+  };
+
+  const handleMmProjChoice = (mmProjFile: HfFile | null) => {
+    if (!mmProjPicker) return;
+    const { repoId, file } = mmProjPicker;
+    setMmProjPicker(null);
+    startDownload(repoId, file);
+    if (mmProjFile) {
+      startDownload(repoId, mmProjFile);
+    }
+  };
+
   const abortDownload = async (filename: string) => {
     try {
       await invoke("abort_download", { filename });
@@ -230,11 +258,22 @@ export default function Models() {
     }
   };
 
+  const handlePreferredOwnersChange = async (newOwners: string[]) => {
+    setPreferredOwners(newOwners);
+    try {
+      await invoke("set_preferred_owners", { owners: newOwners });
+      const updated = await invoke<KnownOwner[]>("get_known_owners");
+      setOwners(updated);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "installed", label: `Installed (${installed.length})` },
     { id: "recommended", label: "Recommended" },
     { id: "browse", label: "Browse HuggingFace" },
-    { id: "directories", label: "Directories" },
+    { id: "settings", label: "Settings" },
   ];
 
   return (
@@ -495,6 +534,7 @@ export default function Models() {
                               download_url: `https://huggingface.co/${m.repo_id}/resolve/main/${m.filename}`,
                               is_split: false,
                               split_parts: [],
+                              is_mmproj: false,
                             })
                           }
                         >
@@ -535,6 +575,7 @@ export default function Models() {
                               download_url: `https://huggingface.co/${m.repo_id}/resolve/main/${m.filename}`,
                               is_split: false,
                               split_parts: [],
+                              is_mmproj: false,
                             })
                           }>
                             Resume
@@ -625,8 +666,8 @@ export default function Models() {
                     {expandedRepo === model.repo_id && (
                       <div className="mt-3 pt-3 border-t border-border space-y-1.5">
                         {repoFiles[model.repo_id] ? (
-                          repoFiles[model.repo_id].length > 0 ? (
-                            repoFiles[model.repo_id].map((f) => {
+                          repoFiles[model.repo_id].filter((f) => !f.is_mmproj).length > 0 ? (
+                            repoFiles[model.repo_id].filter((f) => !f.is_mmproj).map((f) => {
                               const dl = downloads[f.filename];
                               const hfBasename = f.filename.includes('/') ? f.filename.split('/').pop()! : f.filename;
                               const isInstalled = installed.some(
@@ -687,7 +728,7 @@ export default function Models() {
                                   ) : (
                                     <button
                                       className="btn-secondary text-xs shrink-0"
-                                      onClick={() => startDownload(model.repo_id, f)}
+                                      onClick={() => handleDownloadClick(model.repo_id, f)}
                                     >
                                       <Download size={11} />
                                     </button>
@@ -724,8 +765,8 @@ export default function Models() {
           </div>
         )}
 
-        {/* ── Directories tab ── */}
-        {tab === "directories" && (
+        {/* ── Settings tab ── */}
+        {tab === "settings" && (
           <div className="space-y-6">
             {/* Download directory */}
             <div className="card">
@@ -801,9 +842,70 @@ export default function Models() {
                 })}
               </div>
             </div>
+
+            {/* Preferred quant sources */}
+            <div className="card">
+              <h2 className="section-title">Preferred Quant Sources</h2>
+              <p className="text-xs text-gray-500 mb-3">
+                HuggingFace users/orgs shown in the Browse tab owner filter, in your preferred order.
+              </p>
+              <PreferredOwners
+                owners={preferredOwners}
+                onChange={handlePreferredOwnersChange}
+              />
+            </div>
           </div>
         )}
       </div>
+
+      {/* mmproj picker modal */}
+      {mmProjPicker && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setMmProjPicker(null)}
+        >
+          <div
+            className="card max-w-md w-full mx-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-gray-200">
+              Download options
+            </h3>
+            <p className="text-xs text-gray-400">
+              This repo contains vision projection (mmproj) files. Download them alongside the model for vision support.
+            </p>
+            <div className="space-y-1.5">
+              <button
+                className="w-full text-left px-3 py-2 rounded hover:bg-surface-3 text-sm text-gray-200"
+                onClick={() => handleMmProjChoice(null)}
+              >
+                Just the model
+                <span className="text-xs text-gray-500 ml-2">
+                  {formatSize(mmProjPicker.file.size_bytes)}
+                </span>
+              </button>
+              {mmProjPicker.mmProjFiles.map((mp) => (
+                <button
+                  key={mp.filename}
+                  className="w-full text-left px-3 py-2 rounded hover:bg-surface-3 text-sm text-gray-200"
+                  onClick={() => handleMmProjChoice(mp)}
+                >
+                  Model + {mp.filename}
+                  <span className="text-xs text-gray-500 ml-2">
+                    {formatSize(mmProjPicker.file.size_bytes + mp.size_bytes)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              className="btn-ghost text-xs w-full"
+              onClick={() => setMmProjPicker(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
