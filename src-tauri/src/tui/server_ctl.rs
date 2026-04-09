@@ -257,7 +257,7 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
-    extern "system" {
+    unsafe extern "system" {
         fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
         fn GetExitCodeProcess(hProcess: *mut std::ffi::c_void, lpExitCode: *mut u32) -> i32;
         fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
@@ -353,7 +353,7 @@ pub fn stop_server(pid: u32) -> anyhow::Result<()> {
 
 #[cfg(windows)]
 pub fn stop_server(pid: u32) -> anyhow::Result<()> {
-    extern "system" {
+    unsafe extern "system" {
         fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
         fn TerminateProcess(hProcess: *mut std::ffi::c_void, uExitCode: u32) -> i32;
         fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
