@@ -1,5 +1,8 @@
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
@@ -11,6 +14,8 @@ import {
   Square,
   Layers,
   X,
+  ArrowUpCircle,
+  RefreshCw,
 } from "lucide-react";
 import { clsx } from "clsx";
 import CatapultIcon from "./CatapultIcon";
@@ -22,6 +27,50 @@ const navItems = [
   { to: "/server", label: "Run", icon: Play },
   { to: "/chat", label: "Chat", icon: MessageSquare },
 ];
+
+type Update = Awaited<ReturnType<typeof check>>;
+
+function VersionInfo() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [update, setUpdate] = useState<Update>(null);
+  const [installing, setInstalling] = useState(false);
+
+  useEffect(() => {
+    getVersion().then(setVersion);
+    check().then(setUpdate).catch(() => {});
+  }, []);
+
+  const handleUpdate = async () => {
+    if (!update || installing) return;
+    setInstalling(true);
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch {
+      setInstalling(false);
+    }
+  };
+
+  if (!version) return null;
+
+  return (
+    <div className="relative z-10 flex items-center gap-1.5 ml-2">
+      <span className="text-xs text-gray-500 select-none tabular-nums">v{version}</span>
+      {update && (
+        <button
+          onClick={handleUpdate}
+          disabled={installing}
+          className="flex items-center text-primary-light hover:text-primary transition-colors disabled:opacity-50"
+          title={installing ? "Installing update…" : `v${update.version} available — click to install & restart`}
+        >
+          {installing
+            ? <RefreshCw size={13} className="animate-spin" />
+            : <ArrowUpCircle size={14} />}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function WindowControls() {
   const appWindow = getCurrentWindow();
@@ -98,6 +147,9 @@ export default function Layout() {
             Catapult
           </span>
         </button>
+
+        {/* Version + update indicator */}
+        <VersionInfo />
 
         {/* Separator */}
         <div className="relative z-10 w-px h-5 bg-primary/20 mx-3" />
