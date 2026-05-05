@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4] - 2026-05-05
+
+### Fixed
+
+- **Updated server parameters**: Updated parameters to match current `master` for llama.cpp
+
+- **Bump versions and synchronize**: Bumped and synchronized Tauri versions
+
 ## [0.1.3] - 2026-04-16
 
 ### Fixed
