@@ -492,7 +492,7 @@ async fn set_download_dir(path: String, state: State<'_, AppState>) -> Result<()
 #[tauri::command]
 async fn start_server(
     app: AppHandle,
-    config: ServerConfig,
+    mut config: ServerConfig,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let app_config = state.config.lock().unwrap().clone();
@@ -503,6 +503,10 @@ async fn start_server(
         .ok_or_else(|| "Runtime not installed. Please download the runtime first.".to_string())?;
 
     let server_state = state.server.clone();
+
+    // Strip flags removed/renamed in newer llama.cpp so old session state or
+    // imported configs don't fail with "argument has been removed".
+    server::migrate_extra_params(&mut config.extra_params);
 
     server::start_server(
         &server_binary,
@@ -647,7 +651,9 @@ async fn load_server_preset(name: String) -> Result<ServerConfig, String> {
     let dir = AppConfig::presets_dir().map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.json", name));
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
+    let mut config: ServerConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    server::migrate_extra_params(&mut config.extra_params);
+    Ok(config)
 }
 
 #[tauri::command]

@@ -141,6 +141,61 @@ pub fn preset_name_from_repo(repo_id: &str) -> String {
     repo_id.replace('/', "__")
 }
 
+/// Rename/drop flag keys that were removed or renamed in newer llama.cpp builds.
+/// Idempotent and safe to call on any `extra_params` map. Returns true if any
+/// changes were made.
+pub fn migrate_extra_params(extra: &mut HashMap<String, String>) -> bool {
+    // Removed entirely (no automatic equivalent — meaning depended on --spec-type
+    // which would now need user attention). Drop them so the server doesn't
+    // refuse to start with an "argument has been removed" error.
+    const REMOVED_DROP: &[&str] = &[
+        "spec-ngram-size-n",
+        "spec-ngram-size-m",
+        "spec-ngram-min-hits",
+    ];
+    // Old → canonical rename. Some are still recognized by llama.cpp as aliases,
+    // but we normalise to the canonical form so the UI and saved presets stay
+    // consistent.
+    const RENAMES: &[(&str, &str)] = &[
+        // Removed entirely — must be migrated
+        ("draft", "spec-draft-n-max"),
+        ("draft-max", "spec-draft-n-max"),
+        ("draft-n-max", "spec-draft-n-max"),
+        ("draft-min", "spec-draft-n-min"),
+        ("draft-n-min", "spec-draft-n-min"),
+        // Still accepted as aliases — normalise to canonical
+        ("model-draft", "spec-draft-model"),
+        ("ctx-size-draft", "spec-draft-ctx-size"),
+        ("n-gpu-layers-draft", "spec-draft-ngl"),
+        ("gpu-layers-draft", "spec-draft-ngl"),
+        ("device-draft", "spec-draft-device"),
+        ("threads-draft", "spec-draft-threads"),
+        ("threads-batch-draft", "spec-draft-threads-batch"),
+        ("cpu-moe-draft", "spec-draft-cpu-moe"),
+        ("draft-cpu-moe", "spec-draft-cpu-moe"),
+        ("n-cpu-moe-draft", "spec-draft-n-cpu-moe"),
+        ("override-tensor-draft", "spec-draft-override-tensor"),
+        ("draft-p-min", "spec-draft-p-min"),
+        ("draft-p-split", "spec-draft-p-split"),
+        ("hf-repo-draft", "spec-draft-hf"),
+    ];
+
+    let mut changed = false;
+    for k in REMOVED_DROP {
+        if extra.remove(*k).is_some() {
+            changed = true;
+        }
+    }
+    for (old, new) in RENAMES {
+        if let Some(v) = extra.remove(*old) {
+            // Don't clobber an explicitly-set canonical value
+            extra.entry((*new).to_string()).or_insert(v);
+            changed = true;
+        }
+    }
+    changed
+}
+
 pub async fn start_server(
     server_binary: &PathBuf,
     config: &ServerConfig,
@@ -790,5 +845,77 @@ mod tests {
     #[test]
     fn preset_name_from_repo_no_slash() {
         assert_eq!(preset_name_from_repo("plain-name"), "plain-name");
+    }
+
+    // ── migrate_extra_params ─────────────────────────────────────────────────
+
+    #[test]
+    fn migrate_drops_removed_ngram_size_flags() {
+        let mut ep = HashMap::new();
+        ep.insert("spec-ngram-size-n".to_string(), "3".to_string());
+        ep.insert("spec-ngram-size-m".to_string(), "5".to_string());
+        ep.insert("spec-ngram-min-hits".to_string(), "1".to_string());
+        ep.insert("kept".to_string(), "1".to_string());
+
+        assert!(migrate_extra_params(&mut ep));
+        assert!(!ep.contains_key("spec-ngram-size-n"));
+        assert!(!ep.contains_key("spec-ngram-size-m"));
+        assert!(!ep.contains_key("spec-ngram-min-hits"));
+        assert_eq!(ep.get("kept"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn migrate_renames_removed_draft_flags_to_spec_draft() {
+        let mut ep = HashMap::new();
+        ep.insert("draft".to_string(), "16".to_string());
+        ep.insert("draft-min".to_string(), "0".to_string());
+
+        assert!(migrate_extra_params(&mut ep));
+        assert_eq!(ep.get("spec-draft-n-max"), Some(&"16".to_string()));
+        assert_eq!(ep.get("spec-draft-n-min"), Some(&"0".to_string()));
+        assert!(!ep.contains_key("draft"));
+        assert!(!ep.contains_key("draft-min"));
+    }
+
+    #[test]
+    fn migrate_canonicalises_draft_aliases() {
+        let mut ep = HashMap::new();
+        ep.insert("model-draft".to_string(), "/p/d.gguf".to_string());
+        ep.insert("ctx-size-draft".to_string(), "4096".to_string());
+        ep.insert("n-gpu-layers-draft".to_string(), "99".to_string());
+        ep.insert("threads-draft".to_string(), "4".to_string());
+        ep.insert("device-draft".to_string(), "cuda0".to_string());
+        ep.insert("cpu-moe-draft".to_string(), String::new());
+
+        assert!(migrate_extra_params(&mut ep));
+        assert_eq!(ep.get("spec-draft-model"), Some(&"/p/d.gguf".to_string()));
+        assert_eq!(ep.get("spec-draft-ctx-size"), Some(&"4096".to_string()));
+        assert_eq!(ep.get("spec-draft-ngl"), Some(&"99".to_string()));
+        assert_eq!(ep.get("spec-draft-threads"), Some(&"4".to_string()));
+        assert_eq!(ep.get("spec-draft-device"), Some(&"cuda0".to_string()));
+        assert_eq!(ep.get("spec-draft-cpu-moe"), Some(&String::new()));
+        assert!(!ep.contains_key("model-draft"));
+    }
+
+    #[test]
+    fn migrate_does_not_clobber_explicit_canonical_value() {
+        let mut ep = HashMap::new();
+        ep.insert("spec-draft-n-max".to_string(), "32".to_string());
+        ep.insert("draft".to_string(), "16".to_string());
+
+        migrate_extra_params(&mut ep);
+        // Canonical wins; the legacy key is removed.
+        assert_eq!(ep.get("spec-draft-n-max"), Some(&"32".to_string()));
+        assert!(!ep.contains_key("draft"));
+    }
+
+    #[test]
+    fn migrate_idempotent_on_clean_map() {
+        let mut ep = HashMap::new();
+        ep.insert("spec-default".to_string(), String::new());
+        ep.insert("temp".to_string(), "0.7".to_string());
+        let before = ep.clone();
+        assert!(!migrate_extra_params(&mut ep));
+        assert_eq!(ep, before);
     }
 }

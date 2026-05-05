@@ -180,10 +180,50 @@ const SESSION_PRESET_KEY = "catapult_server_preset";
 const SESSION_TAB_KEY = "catapult_server_tab";
 const SESSION_STATUS_KEY = "catapult_server_status";
 
+// Mirror of server::migrate_extra_params. Renames/drops flags removed in
+// newer llama.cpp builds so old session state and imported presets keep working.
+const REMOVED_EP_KEYS = ["spec-ngram-size-n", "spec-ngram-size-m", "spec-ngram-min-hits"] as const;
+const RENAMED_EP_KEYS: Record<string, string> = {
+  "draft": "spec-draft-n-max",
+  "draft-max": "spec-draft-n-max",
+  "draft-n-max": "spec-draft-n-max",
+  "draft-min": "spec-draft-n-min",
+  "draft-n-min": "spec-draft-n-min",
+  "model-draft": "spec-draft-model",
+  "ctx-size-draft": "spec-draft-ctx-size",
+  "n-gpu-layers-draft": "spec-draft-ngl",
+  "gpu-layers-draft": "spec-draft-ngl",
+  "device-draft": "spec-draft-device",
+  "threads-draft": "spec-draft-threads",
+  "threads-batch-draft": "spec-draft-threads-batch",
+  "cpu-moe-draft": "spec-draft-cpu-moe",
+  "draft-cpu-moe": "spec-draft-cpu-moe",
+  "n-cpu-moe-draft": "spec-draft-n-cpu-moe",
+  "override-tensor-draft": "spec-draft-override-tensor",
+  "draft-p-min": "spec-draft-p-min",
+  "draft-p-split": "spec-draft-p-split",
+  "hf-repo-draft": "spec-draft-hf",
+};
+
+export function migrateExtraParams(extra: Record<string, string>): Record<string, string> {
+  const out = { ...extra };
+  for (const k of REMOVED_EP_KEYS) delete out[k];
+  for (const [oldKey, newKey] of Object.entries(RENAMED_EP_KEYS)) {
+    if (oldKey in out && !(newKey in out)) {
+      out[newKey] = out[oldKey];
+    }
+    delete out[oldKey];
+  }
+  return out;
+}
+
 function loadSessionConfig(): ServerConfig | null {
   try {
     const raw = sessionStorage.getItem(SESSION_CONFIG_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const cfg = JSON.parse(raw) as ServerConfig;
+    if (cfg.extra_params) cfg.extra_params = migrateExtraParams(cfg.extra_params);
+    return cfg;
   } catch { return null; }
 }
 
@@ -315,6 +355,7 @@ export default function Server() {
   const loadPreset = async (name: string, modelPath?: string) => {
     try {
       const loaded = await invoke<ServerConfig>("load_server_preset", { name });
+      if (loaded.extra_params) loaded.extra_params = migrateExtraParams(loaded.extra_params);
       // Preserve current model_path and mmproj_path
       setConfig((prev) => ({
         ...loaded,
@@ -362,6 +403,7 @@ export default function Server() {
   const loadDefaults = async () => {
     try {
       const loaded = await invoke<ServerConfig>("load_server_preset", { name: "__default__" });
+      if (loaded.extra_params) loaded.extra_params = migrateExtraParams(loaded.extra_params);
       setConfig((prev) => ({
         ...loaded,
         model_path: prev.model_path,
@@ -727,6 +769,8 @@ export default function Server() {
                 onChange={(v) => { setFlag("kv-unified", v); setFlag("no-kv-unified", !v); }} />
               <Toggle label="Context Shift" hint="Use context shift on infinite text generation" checked={hasFlag("context-shift")} onChange={(v) => { setFlag("context-shift", v); setFlag("no-context-shift", !v); }} />
               <Toggle label="Cache Prompt" hint="Enable prompt caching (default: on)" checked={!hasFlag("no-cache-prompt")} onChange={(v) => setFlag("no-cache-prompt", !v)} />
+              <Toggle label="Cache Idle Slots" hint="Save and clear idle slots on new task (default: on, requires KV unified + cache-ram)"
+                checked={!hasFlag("no-cache-idle-slots")} onChange={(v) => setFlag("no-cache-idle-slots", !v)} />
             </div>
             <div className="grid grid-cols-2 gap-3 mt-2">
               <NumberInput label="Cache Reuse" hint="Min chunk for KV shifting reuse (0=disabled)" value={getEpNum("cache-reuse")} min={0}
@@ -783,7 +827,7 @@ export default function Server() {
                 onChange={(v) => setConfig((c) => ({ ...c, no_mmap: !v }))} />
               <Toggle label="Direct IO" hint="Use DirectIO if available" checked={hasFlag("direct-io")} onChange={(v) => setFlag("direct-io", v)} />
               <Toggle label="CPU MoE" hint="Keep all MoE weights on CPU" checked={hasFlag("cpu-moe")} onChange={(v) => setFlag("cpu-moe", v)} />
-              <Toggle label="CPU MoE (Draft)" hint="Keep all MoE weights on CPU for draft model" checked={hasFlag("cpu-moe-draft")} onChange={(v) => setFlag("cpu-moe-draft", v)} />
+              <Toggle label="CPU MoE (Draft)" hint="Keep all MoE weights on CPU for draft model" checked={hasFlag("spec-draft-cpu-moe")} onChange={(v) => setFlag("spec-draft-cpu-moe", v)} />
               <Toggle label="Repack" hint="Enable weight repacking (default: on)" checked={!hasFlag("no-repack")} onChange={(v) => setFlag("no-repack", !v)} />
               <Toggle label="Op Offload" hint="Offload host tensor ops to device (default: on)" checked={!hasFlag("no-op-offload")} onChange={(v) => setFlag("no-op-offload", !v)} />
               <Toggle label="No Host Buffer" hint="Bypass host buffer for extra device buffers" checked={hasFlag("no-host")} onChange={(v) => setFlag("no-host", v)} />
@@ -792,16 +836,16 @@ export default function Server() {
             <div className="grid grid-cols-2 gap-3 mt-2">
               <NumberInput label="N CPU MoE Layers" hint="Keep MoE weights of first N layers on CPU" value={getEpNum("n-cpu-moe")} min={0}
                 onChange={(v) => setEpNum("n-cpu-moe", v)} />
-              <NumberInput label="N CPU MoE Layers (Draft)" hint="Keep MoE weights of first N layers on CPU for draft" value={getEpNum("n-cpu-moe-draft")} min={0}
-                onChange={(v) => setEpNum("n-cpu-moe-draft", v)} />
+              <NumberInput label="N CPU MoE Layers (Draft)" hint="Keep MoE weights of first N layers on CPU for draft" value={getEpNum("spec-draft-n-cpu-moe")} min={0}
+                onChange={(v) => setEpNum("spec-draft-n-cpu-moe", v)} />
             </div>
 
             <Section title="Overrides" />
             <div className="grid grid-cols-1 gap-3">
               <TextInput label="Override Tensor" hint="<pattern>=<buffer type>,... e.g. attn_v=cuda0" value={getEp("override-tensor")}
                 onChange={(v) => setEp("override-tensor", v)} />
-              <TextInput label="Override Tensor (Draft)" hint="Tensor buffer type override for draft model: <pattern>=<type>,..." value={getEp("override-tensor-draft")}
-                onChange={(v) => setEp("override-tensor-draft", v)} />
+              <TextInput label="Override Tensor (Draft)" hint="Tensor buffer type override for draft model: <pattern>=<type>,..." value={getEp("spec-draft-override-tensor")}
+                onChange={(v) => setEp("spec-draft-override-tensor", v)} />
               <TextInput label="Override KV" hint="KEY=TYPE:VALUE,... e.g. tokenizer.ggml.add_bos_token=bool:false" value={getEp("override-kv")}
                 onChange={(v) => setEp("override-kv", v)} />
             </div>
@@ -1054,38 +1098,78 @@ export default function Server() {
             </div>
 
             <Section title="Speculative Decoding" />
-            <div className="grid grid-cols-2 gap-3">
-              <TextInput label="Draft Model" hint="Path to draft model for speculation" value={getEp("model-draft")}
-                onChange={(v) => setEp("model-draft", v)} />
-              <SelectInput label="Spec Type" hint="Without draft model" value={getEp("spec-type") || ""}
+            <div className="space-y-3">
+              <Toggle label="Default Speculative Config"
+                hint="Enable a sensible default (ngram-mod with n_match=24, n_min=48, n_max=64). Quick way to try spec decoding."
+                checked={hasFlag("spec-default")} onChange={(v) => setFlag("spec-default", v)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <TextInput label="Draft Model" hint="Path to draft model for speculation" value={getEp("spec-draft-model")}
+                onChange={(v) => setEp("spec-draft-model", v)} />
+              <SelectInput label="Spec Type" hint="Used when no draft model is provided" value={getEp("spec-type") || ""}
                 options={[{ value: "", label: "None" }, { value: "ngram-cache", label: "N-gram Cache" }, { value: "ngram-simple", label: "N-gram Simple" },
                   { value: "ngram-map-k", label: "N-gram Map K" }, { value: "ngram-map-k4v", label: "N-gram Map K4V" }, { value: "ngram-mod", label: "N-gram Mod" }]}
                 onChange={(v) => setEp("spec-type", v)} />
-              <NumberInput label="Draft Max" hint="Max draft tokens (default: 16)" value={getEpNum("draft")} min={1}
-                onChange={(v) => setEpNum("draft", v)} />
-              <NumberInput label="Draft Min" hint="Min draft tokens (default: 0)" value={getEpNum("draft-min")} min={0}
-                onChange={(v) => setEpNum("draft-min", v)} />
-              <NumberInput label="Draft P Min" hint="Min probability for greedy (default: 0.75)" value={getEpNum("draft-p-min")} step={0.01}
-                onChange={(v) => setEpNum("draft-p-min", v)} />
-              <NumberInput label="Draft Ctx Size" hint="0 = from model" value={getEpNum("ctx-size-draft")} min={0}
-                onChange={(v) => setEpNum("ctx-size-draft", v)} />
-              <NumberInput label="Draft GPU Layers" value={getEpNum("n-gpu-layers-draft")}
-                onChange={(v) => setEpNum("n-gpu-layers-draft", v)} />
-              <NumberInput label="Draft Threads" hint="CPU threads for draft model generation" value={getEpNum("threads-draft")}
-                onChange={(v) => setEpNum("threads-draft", v)} />
-              <NumberInput label="Draft Batch Threads" hint="Threads for draft model batch/prompt processing" value={getEpNum("threads-batch-draft")}
-                onChange={(v) => setEpNum("threads-batch-draft", v)} />
-              <TextInput label="Draft Device" hint="Devices for draft model, comma-separated" value={getEp("device-draft")}
-                onChange={(v) => setEp("device-draft", v)} />
+              <NumberInput label="Draft Max" hint="Max draft tokens (default: 16)" value={getEpNum("spec-draft-n-max")} min={1}
+                onChange={(v) => setEpNum("spec-draft-n-max", v)} />
+              <NumberInput label="Draft Min" hint="Min draft tokens (default: 0)" value={getEpNum("spec-draft-n-min")} min={0}
+                onChange={(v) => setEpNum("spec-draft-n-min", v)} />
+              <NumberInput label="Draft P Min" hint="Min probability for greedy (default: 0.75)" value={getEpNum("spec-draft-p-min")} step={0.01}
+                onChange={(v) => setEpNum("spec-draft-p-min", v)} />
+              <NumberInput label="Draft P Split" hint="Speculative split probability" value={getEpNum("spec-draft-p-split")} step={0.01}
+                onChange={(v) => setEpNum("spec-draft-p-split", v)} />
+              <NumberInput label="Draft Ctx Size" hint="0 = from model" value={getEpNum("spec-draft-ctx-size")} min={0}
+                onChange={(v) => setEpNum("spec-draft-ctx-size", v)} />
+              <NumberInput label="Draft GPU Layers" value={getEpNum("spec-draft-ngl")}
+                onChange={(v) => setEpNum("spec-draft-ngl", v)} />
+              <NumberInput label="Draft Threads" hint="CPU threads for draft model generation" value={getEpNum("spec-draft-threads")}
+                onChange={(v) => setEpNum("spec-draft-threads", v)} />
+              <NumberInput label="Draft Batch Threads" hint="Threads for draft model batch/prompt processing" value={getEpNum("spec-draft-threads-batch")}
+                onChange={(v) => setEpNum("spec-draft-threads-batch", v)} />
+              <TextInput label="Draft Device" hint="Devices for draft model, comma-separated" value={getEp("spec-draft-device")}
+                onChange={(v) => setEp("spec-draft-device", v)} />
             </div>
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              <NumberInput label="N-gram Size N" hint="N-gram size N for ngram-simple/ngram-map speculation" value={getEpNum("spec-ngram-size-n")} min={1}
-                onChange={(v) => setEpNum("spec-ngram-size-n", v)} />
-              <NumberInput label="N-gram Size M" hint="N-gram size M for ngram-simple/ngram-map speculation" value={getEpNum("spec-ngram-size-m")} min={1}
-                onChange={(v) => setEpNum("spec-ngram-size-m", v)} />
-              <NumberInput label="N-gram Min Hits" hint="Minimum hits for ngram-map speculation" value={getEpNum("spec-ngram-min-hits")} min={0}
-                onChange={(v) => setEpNum("spec-ngram-min-hits", v)} />
-            </div>
+            {/* Per-spec-type ngram controls — shown only for the selected type */}
+            {getEp("spec-type") === "ngram-mod" && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <NumberInput label="ngram-mod N Min" hint="Default: 48" value={getEpNum("spec-ngram-mod-n-min")} min={0}
+                  onChange={(v) => setEpNum("spec-ngram-mod-n-min", v)} />
+                <NumberInput label="ngram-mod N Max" hint="Default: 64" value={getEpNum("spec-ngram-mod-n-max")} min={0}
+                  onChange={(v) => setEpNum("spec-ngram-mod-n-max", v)} />
+                <NumberInput label="ngram-mod Match" hint="Lookup length (default: 24)" value={getEpNum("spec-ngram-mod-n-match")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-mod-n-match", v)} />
+              </div>
+            )}
+            {getEp("spec-type") === "ngram-simple" && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <NumberInput label="ngram-simple Size N" hint="Lookup n-gram length" value={getEpNum("spec-ngram-simple-size-n")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-simple-size-n", v)} />
+                <NumberInput label="ngram-simple Size M" hint="Draft m-gram length" value={getEpNum("spec-ngram-simple-size-m")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-simple-size-m", v)} />
+                <NumberInput label="ngram-simple Min Hits" value={getEpNum("spec-ngram-simple-min-hits")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-simple-min-hits", v)} />
+              </div>
+            )}
+            {getEp("spec-type") === "ngram-map-k" && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <NumberInput label="ngram-map-k Size N" hint="Lookup n-gram length" value={getEpNum("spec-ngram-map-k-size-n")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k-size-n", v)} />
+                <NumberInput label="ngram-map-k Size M" hint="Draft m-gram length" value={getEpNum("spec-ngram-map-k-size-m")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k-size-m", v)} />
+                <NumberInput label="ngram-map-k Min Hits" value={getEpNum("spec-ngram-map-k-min-hits")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k-min-hits", v)} />
+              </div>
+            )}
+            {getEp("spec-type") === "ngram-map-k4v" && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <NumberInput label="ngram-map-k4v Size N" hint="Lookup n-gram length" value={getEpNum("spec-ngram-map-k4v-size-n")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k4v-size-n", v)} />
+                <NumberInput label="ngram-map-k4v Size M" hint="Draft m-gram length" value={getEpNum("spec-ngram-map-k4v-size-m")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k4v-size-m", v)} />
+                <NumberInput label="ngram-map-k4v Min Hits" value={getEpNum("spec-ngram-map-k4v-min-hits")} min={1}
+                  onChange={(v) => setEpNum("spec-ngram-map-k4v-min-hits", v)} />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 mt-2">
               <TextInput label="Lookup Cache (Static)" hint="Read-only lookup cache file for lookup decoding" value={getEp("lookup-cache-static")}
                 onChange={(v) => setEp("lookup-cache-static", v)} />
