@@ -327,7 +327,9 @@ fn scan_gguf_recursive(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let file_meta = match entry.metadata() {
+            // Use std::fs::metadata to follow symlinks (e.g., HuggingFace cache links)
+            // DirEntry::metadata() can return symlink metadata on some platforms
+            let file_meta = match std::fs::metadata(&path) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
